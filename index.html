@@ -76,8 +76,9 @@
   .gbtn .chev{font-size:26px;line-height:1;color:var(--g)}
   .gbtn[aria-pressed=true]{background:linear-gradient(90deg,var(--g),rgba(125,255,79,.55));color:#031004;border-color:var(--g);box-shadow:0 0 18px rgba(125,255,79,.4)}
   .gbtn[aria-pressed=true] .tag,.gbtn[aria-pressed=true] .chev{color:#031004}
-  .gbtn.lib{font-family:var(--head);font-size:20px;padding:16px;border-color:var(--g)}
-  .gbtn.lib .lbl2{display:flex;align-items:center;gap:12px}
+  .gbtn.lib{position:relative;justify-content:center;text-align:center;font-family:var(--head);font-size:20px;padding:16px 40px;border-color:var(--g)}
+  .gbtn.lib .lbl2{display:flex;align-items:center;justify-content:center;gap:12px}
+  .gbtn.lib .chev{position:absolute;right:16px;top:50%;transform:translateY(-52%)}
   .gbtn.lib svg{width:26px;height:26px;fill:none;stroke:var(--g);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
   .gbtn.lib[aria-pressed=true] svg{stroke:#031004}
   .gbtn.live{justify-content:center;gap:12px;background:var(--g);color:#031004;border-color:var(--g);font-family:var(--head);font-size:20px;padding:16px;margin-top:4px}
@@ -235,7 +236,11 @@
     .src{display:none}
     .selector{padding:18px 16px}
     .gbtn{font-size:18px;padding:12px 14px}
-    .gbtn.lib,.gbtn.live{font-size:19px;padding:15px}
+    .gbtn.live{font-size:19px;padding:15px}
+    .gbtn.lib{font-size:17px;padding:15px 32px 15px 14px;letter-spacing:.01em}
+    .gbtn.lib .lbl2{gap:9px}
+    .gbtn.lib svg{width:22px;height:22px}
+    .gbtn.lib .chev{right:12px}
     .page{padding:20px 18px}
     .logo-row svg{width:72px;height:72px}
     .logo-row .big{font-size:32px}
@@ -825,7 +830,7 @@ async function resume(){
   try{ await audio.play(); }catch(_){ playNext(); }
 }
 async function togglePlay(){
-  if (!mode){ selectStation(STATIONS[0]); return; }
+  if (!mode){ startLive(); return; }
   if (audio.paused) await resume(); else audio.pause();
 }
 function doNext(){ if (mode === 'lib'){ errorCount = 0; playNext(); } }
@@ -878,7 +883,7 @@ function renderSelector(){
   if (!libOpen){
     $('selSub').textContent = 'Entra a la librería o sintoniza el aire →';
     body.append(
-      mkBtn('lib', `<span class="lbl2">${ICON_LIB}<span>Librería</span></span><span class="chev">›</span>`,
+      mkBtn('lib', `<span class="lbl2">${ICON_LIB}<span>${mode === 'lib' ? 'Reproduciendo librería' : 'Librería'}</span></span><span class="chev">›</span>`,
             () => { libOpen = true; libPath = []; renderSelector(); }, mode === 'lib'),
       liveBtn
     );
@@ -964,8 +969,7 @@ window.addEventListener('hashchange', route);
 
 $('enter').addEventListener('click', () => {
   $('gate').classList.add('off');
-  selectStation(STATIONS[0]);     // el clic del usuario habilita el audio
-  libOpen = true; libPath = []; renderSelector();
+  startLive();                    // al entrar suena el aire; el clic del usuario habilita el audio
 });
 
 /* ==================== ONDA (decorativa) ====================
