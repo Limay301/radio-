@@ -592,6 +592,7 @@ async function liveTune(){
 async function startLive(){
   const token = ++loadToken;
   mode = 'live'; station = LIVE_ST;
+  libOpen = false; libPath = [];          // vuelve al inicio: botones Librería y En vivo
   pool = []; queue = []; history = []; current = null; errorCount = 0;
   audio.pause();
   $('title').textContent = 'Sintonizando…';
