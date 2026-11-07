@@ -129,7 +129,10 @@
   .prow .tm:last-child{text-align:right;color:var(--dim)}
   body.live #tCur{color:var(--red);font-family:var(--head);font-size:15px;letter-spacing:.1em}
   body.live #tCur::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:7px;box-shadow:0 0 8px var(--red)}
-  .track{position:relative;flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.1)}
+  .track{position:relative;flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.1);cursor:pointer;touch-action:none}
+  .track::before{content:"";position:absolute;left:0;right:0;top:-16px;bottom:-16px}   /* zona de toque más grande */
+  .track:focus-visible{outline:2px solid var(--g);outline-offset:6px}
+  body.live .track{cursor:default;pointer-events:none}
   .track .fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;background:var(--g);box-shadow:0 0 10px var(--g)}
   .track .dot{position:absolute;top:50%;left:0;width:11px;height:11px;border-radius:50%;background:var(--g2);transform:translate(-50%,-50%);box-shadow:0 0 12px var(--g)}
   body.live .track .dot{display:none}
@@ -245,6 +248,9 @@
     .logo-row svg{width:72px;height:72px}
     .logo-row .big{font-size:32px}
   }
+  /* En celulares y tabletas el volumen lo controlan los botones del equipo (el navegador no deja cambiarlo desde la página) */
+  body.no-vol .vrow{display:none}
+  @media (hover:none) and (pointer:coarse){ .vrow{display:none} }
   @media (prefers-reduced-motion:reduce){body.playing .badge i{animation:none}}
 </style>
 </head>
@@ -267,7 +273,7 @@
       <svg viewBox="0 0 64 64"><use href="#alien"/></svg>
       <div class="big">ALIEN<br>RADIO</div>
     </div>
-    <p>Techno sin parar. Música independiente, artistas acreditados.</p>
+    <p>Techno sin parar. Música de otro planeta</p>
     <button class="enter" id="enter">ENTRAR</button>
   </div>
 </div>
@@ -322,7 +328,7 @@
 
         <div class="prow">
           <span class="tm" id="tCur">0:00</span>
-          <div class="track" aria-hidden="true"><div class="fill" id="fill"></div><div class="dot" id="dot"></div></div>
+          <div class="track" id="seekbar" role="slider" tabindex="0" aria-label="Posición del tema" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="fill" id="fill"></div><div class="dot" id="dot"></div></div>
           <span class="tm" id="tDur">0:00</span>
         </div>
 
@@ -723,14 +729,66 @@ function refreshState(){
   }
 }
 
+let seeking = false;
+const trackDur = () => (mode !== 'live' && isFinite(audio.duration) && audio.duration) || (current && current.duration) || 0;
+
 function updateTimes(){
-  const d = (mode !== 'live' && isFinite(audio.duration) && audio.duration) || (current && current.duration) || 0;
+  if (seeking) return;                       // mientras arrastras, la barra sigue tu dedo
+  const d = trackDur();
   const pct = d ? Math.min(100, audio.currentTime / d * 100) : 0;
   $('tCur').textContent = mode === 'live' ? 'EN VIVO' : fmt(audio.currentTime);
   $('fill').style.width = pct + '%';
   $('dot').style.left = pct + '%';
   $('mFill').style.width = pct + '%';
+  const sb = $('seekbar');
+  sb.setAttribute('aria-valuemax', Math.round(d));
+  sb.setAttribute('aria-valuenow', Math.round(audio.currentTime));
+  const live = mode === 'live';
+  sb.setAttribute('aria-disabled', live ? 'true' : 'false');
+  sb.tabIndex = live ? -1 : 0;
 }
+
+/* Barra de tiempo: se puede tocar o arrastrar en la librería (en vivo no) */
+function seekPreview(e){
+  const d = trackDur();
+  if (!d) return null;
+  const r = $('seekbar').getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  $('fill').style.width = (pct * 100) + '%';
+  $('dot').style.left = (pct * 100) + '%';
+  $('mFill').style.width = (pct * 100) + '%';
+  $('tCur').textContent = fmt(pct * d);
+  return pct * d;
+}
+(function(){
+  const sb = $('seekbar');
+  sb.addEventListener('pointerdown', e => {
+    if (mode !== 'lib') return;
+    seeking = true;
+    try{ sb.setPointerCapture(e.pointerId); }catch(_){}
+    seekPreview(e);
+  });
+  sb.addEventListener('pointermove', e => { if (seeking) seekPreview(e); });
+  sb.addEventListener('pointerup', e => {
+    if (!seeking) return;
+    const t = seekPreview(e);
+    seeking = false;
+    if (t !== null){ try{ audio.currentTime = t; }catch(_){} }
+    updateTimes();
+  });
+  sb.addEventListener('pointercancel', () => { seeking = false; updateTimes(); });
+  sb.addEventListener('keydown', e => {
+    if (mode !== 'lib') return;
+    const d = trackDur();
+    if (!d) return;
+    let t = null;
+    if (e.key === 'ArrowRight') t = audio.currentTime + 10;
+    else if (e.key === 'ArrowLeft') t = audio.currentTime - 10;
+    if (t === null) return;
+    e.preventDefault();
+    try{ audio.currentTime = Math.max(0, Math.min(d - 1, t)); }catch(_){}
+  });
+})();
 
 function updateMbar(){
   document.body.classList.toggle('has-mbar', !!mode && currentView !== 'inicio');
@@ -853,6 +911,11 @@ function setVol(v){
   $('vp').dataset.p = p + '%';
 }
 $('volume').addEventListener('input', e => setVol(parseFloat(e.target.value)));
+// Si el navegador no deja cambiar el volumen (iPhone/iPad), se oculta el control: se usan los botones del equipo
+try{
+  audio.volume = 0.5;
+  if (Math.abs(audio.volume - 0.5) > 0.01) document.body.classList.add('no-vol');
+}catch(_){ document.body.classList.add('no-vol'); }
 setVol(0.8);
 
 if ('mediaSession' in navigator){
