@@ -416,23 +416,45 @@ const CONFIG = {
   songsPerSet: 5         // en la programación simulada: 5 temas y luego 1 set
 };
 
-// LIBRERÍA. genre = nombre exacto de género en Audius. query = búsqueda opcional.
-// Para añadir subcategorías a futuro, agrega  sub: [ {id,name,genre,...}, ... ]  a cualquier estación.
+// LIBRERÍA. Géneros con subgéneros opcionales (sub:[...]).
+// genre = nombre exacto de género en Audius (si existe). queries = búsquedas por palabra (para subgéneros).
+// Al tocar un género suena todo el género al azar; al elegir un subgénero suena solo ese.
 const STATIONS = [
-  { id:'techno',    name:'Techno',        genre:'Techno',         time:'week', tag:'Popular' },
-  { id:'minimal',   name:'House Minimal', genre:'Deep House',     time:'week', query:'minimal' },
-  { id:'hard',      name:'Hard Techno',   genre:'Techno',         time:'week', query:'hard' },
-  { id:'dnb',       name:'Drum and Bass', genre:'Drum & Bass',    time:'week' },
-  { id:'techhouse', name:'Tech House',    genre:'Tech House',     time:'week' },
-  { id:'trance',    name:'Trance',        genre:'Trance',         time:'week' }
+  { id:'house', name:'House', genre:'House', time:'week', sub:[
+    { id:'house-deep',    name:'Deep House',        genre:'Deep House',        time:'week' },
+    { id:'house-tech',    name:'Tech House',        genre:'Tech House',        time:'week' },
+    { id:'house-prog',    name:'Progressive House', genre:'Progressive House', time:'week' },
+    { id:'house-melodic', name:'Melodic House',     genre:'House', queries:['melodic house'] },
+    { id:'house-acid',    name:'Acid House',        genre:'House', queries:['acid house'] }
+  ]},
+  { id:'techno', name:'Techno', genre:'Techno', time:'week', tag:'Popular', sub:[
+    { id:'techno-hard',    name:'Hard Techno',    genre:'Techno', queries:['hard techno','hard'] },
+    { id:'techno-minimal', name:'Minimal',        genre:'Techno', queries:['minimal techno','minimal'] },
+    { id:'techno-melodic', name:'Melodic Techno', genre:'Techno', queries:['melodic techno','melodic'] },
+    { id:'techno-acid',    name:'Acid Techno',    genre:'Techno', queries:['acid techno','acid'] },
+    { id:'techno-dub',     name:'Dub Techno',     genre:'Techno', queries:['dub techno','dub'] }
+  ]},
+  { id:'trance', name:'Trance', genre:'Trance', time:'week', sub:[
+    { id:'trance-prog',   name:'Progressive',  genre:'Trance', queries:['progressive trance','progressive'] },
+    { id:'trance-psy',    name:'Psy-Trance',   genre:'Trance', queries:['psy trance','psytrance','psychedelic'] },
+    { id:'trance-uplift', name:'Uplifting',    genre:'Trance', queries:['uplifting trance','uplifting'] },
+    { id:'trance-vocal',  name:'Vocal Trance', genre:'Trance', queries:['vocal trance','vocal'] }
+  ]},
+  // Industrial no es un género fijo en Audius: se busca por palabra en todo el catálogo
+  { id:'industrial', name:'Industrial', queries:['industrial','industrial techno','dark industrial'], sub:[
+    { id:'ind-techno', name:'Industrial Techno', genre:'Techno', queries:['industrial techno','industrial'] },
+    { id:'ind-ebm',    name:'EBM',               queries:['ebm','electronic body music','industrial'] },
+    { id:'ind-dark',   name:'Dark Ambient',      queries:['dark ambient','industrial ambient'] },
+    { id:'ind-post',   name:'Post-Industrial',   queries:['post industrial','post-industrial','industrial'] }
+  ]}
 ];
 const LIVE_ST = { id:'live', name:'En vivo' };
 
 const BLOCKS = [
-  { from:6,  to:12, label:'Amanecer',   stId:'minimal',   desc:'Groove suave para arrancar' },
-  { from:12, to:18, label:'Tarde',      stId:'techhouse', desc:'Ritmo constante y bailable' },
+  { from:6,  to:12, label:'Amanecer',   stId:'house-deep',   desc:'Groove suave para arrancar' },
+  { from:12, to:18, label:'Tarde',      stId:'house-tech', desc:'Ritmo constante y bailable' },
   { from:18, to:24, label:'Noche',      stId:'techno',    desc:'El núcleo duro del techno' },
-  { from:0,  to:6,  label:'Madrugada',  stId:'hard',      desc:'Intensidad máxima' }
+  { from:0,  to:6,  label:'Madrugada',  stId:'industrial',      desc:'Intensidad máxima' }
 ];
 
 /* ==================== ESTADO ==================== */
@@ -478,18 +500,19 @@ function playable(t){
 const isSet = t => (t && t.duration || 0) >= CONFIG.setMinSeconds;
 
 async function fetchOne(st){
-  let list = [];
-  if (st.query){
-    try{
-      const r = await api('/tracks/search', { query: st.query, genre: st.genre, limit: 80 });
-      list = (r.data || []).filter(playable);
-    }catch(_){}
+  const list = [];
+  const seen = new Set();
+  const add = arr => arr.forEach(t => { if (playable(t) && !seen.has(t.id)){ seen.add(t.id); list.push(t); } });
+  const queries = st.queries || [];
+  if (queries.length){
+    const res = await Promise.allSettled(queries.map(q => api('/tracks/search', { query: q, genre: st.genre, limit: 80 })));
+    res.forEach(r => { if (r.status === 'fulfilled') add(r.value.data || []); });
   }
-  if (list.length < 8){
-    const r = await api('/tracks/trending', { genre: st.genre, time: st.time || 'week', limit: 100 });
-    const extra = (r.data || []).filter(playable);
-    const ids = new Set(list.map(t => t.id));
-    list = list.concat(extra.filter(t => !ids.has(t.id)));
+  if (list.length < 8 && st.genre){          // pocos resultados → se completa con lo mejor del género
+    try{
+      const r = await api('/tracks/trending', { genre: st.genre, time: st.time || 'week', limit: 100 });
+      add(r.data || []);
+    }catch(e){ if (!list.length) throw e; }
   }
   return list;
 }
@@ -535,7 +558,7 @@ async function fetchPlaylist(ref){
 }
 
 async function buildSimulatedList(){
-  const songSrc = [STATIONS[0], STATIONS[2], STATIONS[4]];
+  const songSrc = ['techno', 'house', 'trance'].map(id => findStation(id)).filter(Boolean);
   const setQueries = [['dj set','Techno'], ['techno mix','Techno'], ['live set','Techno'], ['techno set','Electronic']];
   const [songRes, setRes] = await Promise.all([
     Promise.allSettled(songSrc.map(fetchOne)),
@@ -954,7 +977,7 @@ function renderSelector(){
   }
 
   // Dentro de la librería: el botón "Librería" desaparece y queda el rastro arriba
-  $('selSub').textContent = 'Elige tu frecuencia alienígena →';
+  $('selSub').textContent = libPath.length ? 'Subgénero (opcional) →' : 'Elige tu frecuencia alienígena →';
   const crumb = document.createElement('div');
   crumb.className = 'crumb';
   const back = document.createElement('button');
@@ -971,17 +994,27 @@ function renderSelector(){
   body.appendChild(crumb);
 
   const node = libPath.length ? libPath[libPath.length - 1] : null;
-  const items = node ? node.sub : STATIONS;
-  items.forEach(st => {
-    const pressed = mode === 'lib' && station && station.id === st.id;
-    let right = '';
-    if (st.sub && st.sub.length) right = '<span class="chev">›</span>';
-    else if (st.tag) right = `<span class="tag"><i><b></b><b></b><b></b><b></b></i>${esc(st.tag)}</span>`;
-    body.appendChild(mkBtn('', `<span>${esc(st.name)}</span>${right}`, () => {
-      if (st.sub && st.sub.length){ libPath.push(st); renderSelector(); }
-      else selectStation(st);
-    }, pressed));
-  });
+  const cur = mode === 'lib' ? station : null;
+  const inTree = st => !!cur && (cur.id === st.id || (st.sub || []).some(x => x.id === cur.id));
+
+  if (node){
+    // Primera opción: todo el género, al azar
+    body.appendChild(mkBtn('', `<span>Todo ${esc(node.name)}</span>`, () => selectStation(node), !!cur && cur.id === node.id));
+    node.sub.forEach(st => {
+      body.appendChild(mkBtn('', `<span>${esc(st.name)}</span>`, () => selectStation(st), !!cur && cur.id === st.id));
+    });
+  } else {
+    STATIONS.forEach(st => {
+      let right = '';
+      if (st.sub && st.sub.length) right = '<span class="chev">›</span>';
+      else if (st.tag) right = `<span class="tag"><i><b></b><b></b><b></b><b></b></i>${esc(st.tag)}</span>`;
+      if (st.sub && st.sub.length && st.tag) right = `<span class="tag"><i><b></b><b></b><b></b><b></b></i>${esc(st.tag)}</span><span class="chev">›</span>`;
+      body.appendChild(mkBtn('', `<span>${esc(st.name)}</span>${right}`, () => {
+        if (st.sub && st.sub.length){ libPath.push(st); }   // abre los subgéneros...
+        selectStation(st);                                    // ...y empieza a sonar todo el género
+      }, inTree(st)));
+    });
+  }
   body.appendChild(liveBtn);
 }
 
@@ -990,6 +1023,14 @@ function findStation(id, list){
   for (const s of (list || STATIONS)){
     if (s.id === id) return s;
     if (s.sub){ const r = findStation(id, s.sub); if (r) return r; }
+  }
+  return null;
+}
+function findPath(id, list, trail){
+  list = list || STATIONS; trail = trail || [];
+  for (const s of list){
+    if (s.id === id) return trail;
+    if (s.sub){ const r = findPath(id, s.sub, trail.concat(s)); if (r) return r; }
   }
   return null;
 }
@@ -1007,7 +1048,7 @@ function renderBlocks(){
     const h = document.createElement('h3'); h.textContent = bl.label;
     const p = document.createElement('p'); p.textContent = bl.desc + ' · ' + st.name;
     const btn = document.createElement('button'); btn.className = 'mini'; btn.textContent = 'Sintonizar';
-    btn.addEventListener('click', () => { location.hash = 'inicio'; selectStation(st); });
+    btn.addEventListener('click', () => { libOpen = true; libPath = findPath(st.id) || []; location.hash = 'inicio'; selectStation(st); });
     d.append(small, h, p, btn);
     box.appendChild(d);
   });
